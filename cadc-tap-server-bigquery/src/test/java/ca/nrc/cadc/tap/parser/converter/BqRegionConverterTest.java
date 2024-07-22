@@ -276,7 +276,7 @@ public class BqRegionConverterTest {
         Assert.assertEquals("NOT(ST_INTERSECTS(bq.table.region, ST_GEOGPOINT(204.25382917, -29.86576111)))", resultFunctionSource);
     }
 
-    @Test
+    //@Test
     /*
     public void handleDistance() {
         BqRegionConverter bqRegionConverter = new BqRegionConverter(new ExpressionNavigator(),
