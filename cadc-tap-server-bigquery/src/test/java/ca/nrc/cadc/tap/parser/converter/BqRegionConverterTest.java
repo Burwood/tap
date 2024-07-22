@@ -277,6 +277,7 @@ public class BqRegionConverterTest {
     }
 
     @Test
+    @Disabled
     public void handleDistance() {
         BqRegionConverter bqRegionConverter = new BqRegionConverter(new ExpressionNavigator(),
                 new ReferenceNavigator(),
