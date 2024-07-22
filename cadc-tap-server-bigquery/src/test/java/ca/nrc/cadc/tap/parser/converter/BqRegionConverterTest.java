@@ -277,7 +277,7 @@ public class BqRegionConverterTest {
     }
 
     @Test
-    @Disabled
+    /*
     public void handleDistance() {
         BqRegionConverter bqRegionConverter = new BqRegionConverter(new ExpressionNavigator(),
                 new ReferenceNavigator(),
@@ -300,4 +300,5 @@ public class BqRegionConverterTest {
 
         Assert.assertEquals("ST_DISTANCE(ST_GEOGPOINT(16.8, 33.4), CIRCLE(ST_GEOGPOINT(88.0, 12.0), 0.8))", distanceFunction.toString());
     }
+    */
 }
