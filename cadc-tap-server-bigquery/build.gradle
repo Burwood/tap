@@ -33,3 +33,17 @@ dependencies {
     testCompile 'org.opencadc:cadc-util:[1.2,)'
     testCompile 'xerces:xercesImpl:[2.0,)'
 }
+
+publishing {
+
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = "https://maven.pkg.github.com/burwood/tap-bigquery"
+            credentials {
+               username = System.getenv("GITHUB_ACTOR")
+               password = System.getenv("GITHUB_TOKEN")
+            }
+        }
+    }
+}

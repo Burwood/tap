@@ -1,4 +1,4 @@
-name: Java CI
+name: Java CI Manual
 
 on:
   workflow_dispatch:
@@ -45,4 +45,9 @@ jobs:
 
     - name: build example-tap
       run: cd example-tap && ../gradlew --info clean build
+
+    - name: Publish package
+      run: cd cadc-tap-server-bigquery && ../gradlew --info publish
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
