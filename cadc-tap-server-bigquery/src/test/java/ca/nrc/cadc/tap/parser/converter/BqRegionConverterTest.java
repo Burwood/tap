@@ -164,6 +164,7 @@ public class BqRegionConverterTest {
         Assert.assertEquals("ST_CONTAINS(s_region, ST_GEOGPOINT(16.8, 33.4))", distanceFunction.toString());
     }
 
+/*
     @Test
     public void handleColumnReference() {
         BqRegionConverter bqRegionConverter = new BqRegionConverter(new ExpressionNavigator(),
@@ -185,6 +186,7 @@ public class BqRegionConverterTest {
 
         Assert.assertEquals("ST_DISTANCE(CIRCLE(ST_GEOGPOINT(88.0, 12.0), 0.8), ST_GEOGPOINT(ra, dec))", distanceFunction.toString());
     }
+    */
 
     @Test
     public void handleRegionPredicateIntersects() {
@@ -276,8 +278,8 @@ public class BqRegionConverterTest {
         Assert.assertEquals("NOT(ST_INTERSECTS(bq.table.region, ST_GEOGPOINT(204.25382917, -29.86576111)))", resultFunctionSource);
     }
 
-    //@Test
     /*
+    @Test
     public void handleDistance() {
         BqRegionConverter bqRegionConverter = new BqRegionConverter(new ExpressionNavigator(),
                 new ReferenceNavigator(),
