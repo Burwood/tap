@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tap-bq
+  labels:
+    app: tap-bq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tap-bq
+  template:
+    metadata:
+      labels:
+        app: tap-bq
+    spec:
+      serviceAccountName: tap-sa
+      containers:
+        - name: cloud-sql-proxy
+          image: gcr.io/cloudsql-docker/gce-proxy:1.26.0
+          command: ["/cloud_sql_proxy"]
+          args: ["-ip_address_types=PUBLIC","-instances=PROJECT_ID_REPLACE:us-central1:tap-schema=tcp:5432",]
+          securityContext:
+            runAsNonRoot: true
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1"
+        - name: tomcat
+          image: gcr.io/tap-adql-bigquery/tap-adql-bq:v1
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "4"
+              memory: "8G"
+            requests:
+              memory: "4Gi"
+              cpu: "2"
+          env:
+            - name: GCP_PROJECT
+              value: PROJECT_ID_REPLACE
+            - name: BQ_SA
+              value: tap-sa
+            - name: BQ_LOG_LEVEL
+              value: "1"
+            - name: BQ_TIMEOUT
+              value: "1800"
+            - name: BQ_QUERY_CACHE
+              value: "1"
+            - name: EXTERNAL_IP
+              value: EXTERNAL_IP_REPLACE
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tapschema-postgres-secret
+                  key: password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tap-service
+spec:
+  selector:
+    app: tap-bq
+  loadBalancerIP: EXTERNAL_IP_REPLACE
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+  type: LoadBalancer

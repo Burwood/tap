@@ -1,0 +1,17 @@
+[
+  {
+    "mode": "REQUIRED",
+    "name": "name",
+    "type": "STRING"
+  },
+  {
+    "mode": "REQUIRED",
+    "name": "value",
+    "type": "STRING"
+  },
+  {
+    "mode": "REQUIRED",
+    "name": "lastModified",
+    "type": "TIMESTAMP"
+  }
+]

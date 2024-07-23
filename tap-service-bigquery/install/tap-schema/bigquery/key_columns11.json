@@ -1,0 +1,17 @@
+[
+  {
+    "mode": "REQUIRED",
+    "name": "key_id",
+    "type": "STRING"
+  },
+  {
+    "mode": "REQUIRED",
+    "name": "from_column",
+    "type": "STRING"
+  },
+  {
+    "mode": "REQUIRED",
+    "name": "target_column",
+    "type": "STRING"
+  }
+]

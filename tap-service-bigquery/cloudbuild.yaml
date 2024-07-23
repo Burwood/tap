@@ -1,0 +1,10 @@
+steps:
+
+# Build Docker Container
+ - id: build container
+   name: 'gcr.io/cloud-builders/docker'
+   args: ['build', '-t', 'gcr.io/$PROJECT_ID/tap-adql-bq-basic:${BUILD_ID}', '-t', 'gcr.io/$PROJECT_ID/tap-adql-bq-basic:latest','.']
+
+images:
+  - gcr.io/$PROJECT_ID/tap-adql-bq-basic:${BUILD_ID}
+  - gcr.io/$PROJECT_ID/tap-adql-bq-basic:latest

@@ -1,0 +1,3 @@
+schema_name,utype,description,schema_index,owner_id,read_anon,read_only_group,read_write_group
+tapdata,,Public Data from Google Cloud,,,,,
+tap_schema,,a special schema to describe TAP-1.1 tablesets,,,,,

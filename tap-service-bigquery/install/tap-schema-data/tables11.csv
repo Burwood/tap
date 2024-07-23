@@ -1,0 +1,8 @@
+schema_name,table_name,table_type,utype,description,table_index,owner_id,read_anon,read_only_group,read_write_group
+tap_schema,tap_schema.schemas,table,,description of schemas in this tableset,1,,,,
+tap_schema,tap_schema.tables,table,,description of tables in this tableset,2,,,,
+tap_schema,tap_schema.columns,table,,description of columns in this tableset,3,,,,
+tap_schema,tap_schema.keys,table,,description of foreign keys in this tableset,4,,,,
+tap_schema,tap_schema.key_columns,table,,description of foreign key columns in this tableset,5,,,,
+tapdata,tapdata.allwise,table,,ALL_WISE Catalog Object Table,6,,,,
+tapdata,tapdata.mepwise,table,,ALL_WISE Catalog MultiEpoch Table,7,,,,
