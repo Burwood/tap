@@ -1,6 +1,8 @@
 plugins {
     id 'java'
     id 'war'
+    //id 'maven'
+    id "maven-publish"
 }
 
 repositories {
@@ -17,32 +19,29 @@ group = 'org.opencadc'
 version = '1.1'
 
 dependencies {
-    compile 'log4j:log4j:[1.2,2.0)'
+    implementation 'log4j:log4j:[1.2,2.0)'
 
-    compile 'org.opencadc:cadc-log:[1.0,)'
-    compile 'org.opencadc:cadc-util:[1.2,)'
-    compile 'org.opencadc:cadc-dali:[1.1,)'
-    compile 'org.opencadc:cadc-uws:[1.0,)'
-    compile 'org.opencadc:cadc-uws-server:[1.2,)'
-//    compile 'org.opencadc:cadc-tap-server:[1.1.5,)'
-    compile project(':cadc-tap-server')
+    //implementation 'org.opencadc:cadc-log:[1.0,)'
+    implementation 'org.opencadc:cadc-util:[1.6,)'
+    implementation 'org.opencadc:cadc-dali:[1.1,)'
+    implementation 'org.opencadc:cadc-uws:[1.0,)'
+    implementation 'org.opencadc:cadc-uws-server:[1.2,)'
+    implementation 'org.opencadc:cadc-tap-server:[1.1.5,)'
+    //implementation (files(':cadc-tap-server'))
 
-    compile 'org.opencadc:cadc-vosi:[1.0,)'
-    compile 'org.opencadc:cadc-adql:[1.1,)'
+    implementation 'org.opencadc:cadc-vosi:[1.0,)'
+    implementation 'org.opencadc:cadc-adql:[1.1,)'
 
-    // Switch out this to use any supported database instead of PostgreSQL.
-    // ## START CUSTOM DATABASE ##
-    compile project(':cadc-tap-server-bigquery')
-    // ## END CUSTOM DATABASE ##
+    implementation (files(':cadc-tap-server-bigquery'))
 
     implementation platform('com.google.cloud:libraries-bom:20.9.0')
-    compile 'com.google.cloud:google-cloud-storage'
+    implementation 'com.google.cloud:google-cloud-storage'
 
-    compile 'com.google.cloud.sql:postgres-socket-factory:1.3.4'
-    compile 'org.postgresql:postgresql:42.2.24'
+    implementation 'com.google.cloud.sql:postgres-socket-factory:1.3.4'
+    implementation 'org.postgresql:postgresql:42.2.24'
 
-    testCompile 'junit:junit:[4.0,)'
-    testCompile 'xmlunit:xmlunit:[1.0,)'
+    testImplementation 'junit:junit:[4.0,)'
+    testImplementation 'xmlunit:xmlunit:[1.0,)'
 }
 
 configurations {
