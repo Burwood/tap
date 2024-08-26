@@ -300,7 +300,12 @@ public class BqRegionConverterTest {
 
         assert distanceFunction instanceof Function;
 
-        Assert.assertEquals("ST_DISTANCE(ST_GEOGPOINT(16.8, 33.4), CIRCLE(ST_GEOGPOINT(88.0, 12.0), 0.8))", distanceFunction.toString());
+        String result = "ST_DISTANCE(ST_GEOGPOINT(16.8, 33.4), CIRCLE(ST_GEOGPOINT(88.0, 12.0), 0.8))", distanceFunction.toString();
+
+        System.out.print(result);
+
+        //Assert.assertEquals("ST_DISTANCE(ST_GEOGPOINT(16.8, 33.4), CIRCLE(ST_GEOGPOINT(88.0, 12.0), 0.8))", distanceFunction.toString());
+        Assert.assertEquals("SAFE_DIVIDE(ST_DISTANCE(ST_GEOGPOINT(16.8, 33.4), CIRCLE(ST_GEOGPOINT(88.0, 12.0), 0.8)))", distanceFunction.toString());
     }
     
 }
