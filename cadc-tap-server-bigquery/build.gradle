@@ -30,7 +30,7 @@ dependencies {
     implementation 'org.opencadc:cadc-jsqlparser-compat:[0.6.4,)'
 
     testImplementation 'junit:junit:[4.0,5.0)'
-    testImplementation 'org.opencadc:cadc-util:[1.2,)'
+    testImplementation 'org.opencadc:cadc-util:[1.6,)'
     testImplementation 'xerces:xercesImpl:[2.0,)'
 }
 
