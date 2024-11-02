@@ -29,10 +29,10 @@ dependencies {
     implementation 'org.opencadc:cadc-tap-server:[1.1.5,)'
     //implementation (files(':cadc-tap-server'))
 
-    implementation 'org.opencadc:cadc-vosi:[1.0,)'
+    implementation 'org.opencadc:cadc-vosi:[1.0,1.3.12]'
     implementation 'org.opencadc:cadc-adql:[1.1,)'
 
-    implementation (files(':cadc-tap-server-bigquery'))
+    implementation (project(path:':cadc-tap-server-bigquery'))
 
     implementation platform('com.google.cloud:libraries-bom:20.9.0')
     implementation 'com.google.cloud:google-cloud-storage'
