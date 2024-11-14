@@ -1,0 +1,13 @@
+rootProject.name = 'tap'
+
+include 'cadc-adql'
+include 'cadc-jsqlparser-compat'
+include 'cadc-tap'
+include 'cadc-tap-schema'
+include 'cadc-tap-server'
+include 'cadc-tap-server-bigquery'
+include 'cadc-tap-server-oracle'
+include 'cadc-tap-server-pg'
+include 'cadc-tap-tmp'
+include 'cadc-test-tap'
+include 'tap-service-bigquery'
