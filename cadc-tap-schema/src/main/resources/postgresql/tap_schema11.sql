@@ -15,10 +15,13 @@ create table tap_schema.schemas11
         schema_index  integer,
 	
 -- extension: permissions for user-created content
-    owner_id        varchar(32),
+    owner_id        varchar(256),
     read_anon       integer,
     read_only_group  varchar(128),
     read_write_group varchar(128),
+
+-- extension: flag to indicate if a schema was created using a Tap service API
+    api_created     integer,
 
 	primary key (schema_name)
 )
@@ -35,10 +38,13 @@ create table tap_schema.tables11
 	table_index   integer,
 
 -- extension: permissions for user-created content
-    owner_id        varchar(32),
+    owner_id        varchar(256),
     read_anon       integer,
     read_only_group  varchar(128),
     read_write_group varchar(128),
+
+-- extension: flag to indicate if a table was created using a Tap service API
+    api_created     integer,
 
 	primary key (table_name),
 	foreign key (schema_name) references tap_schema.schemas11 (schema_name)
@@ -66,10 +72,10 @@ create table tap_schema.columns11
 -- TAP-1.1 column_index
 	column_index   integer,
 -- extension: globally unique columnID for use as an XML ID attribute on the FIELD in VOTable output
-        id            varchar(32),
+    column_id     varchar(32),
 	
 -- extension: permissions for user-created content
-    owner_id        varchar(32),
+    owner_id        varchar(256),
     read_anon       integer,
     read_only_group  varchar(128),
     read_write_group varchar(128),
@@ -77,6 +83,11 @@ create table tap_schema.columns11
 	primary key (table_name,column_name),
 	foreign key (table_name) references tap_schema.tables11 (table_name)
 )
+;
+
+create unique index columns_column_id
+    on tap_schema.columns11 (column_id)
+    where column_id is not null
 ;
 
 create table tap_schema.keys11

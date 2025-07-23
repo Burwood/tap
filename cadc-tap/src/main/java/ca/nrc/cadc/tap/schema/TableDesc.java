@@ -69,25 +69,43 @@
 
 package ca.nrc.cadc.tap.schema;
 
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * Descriptor Class to represent a TAP_SCHEMA.tables table.
  * 
  */
-public class TableDesc
-{
+public class TableDesc {
     private String schemaName;
     private String tableName;
-    private final List<ColumnDesc> columnDescs = new ArrayList<ColumnDesc>();
-    private final List<KeyDesc> keyDescs = new ArrayList<KeyDesc>();
+    private final List<ColumnDesc> columnDescs = new ArrayList<>();
+    private final List<KeyDesc> keyDescs = new ArrayList<>();
     
     public String description;
     public String utype;
     public Integer tableIndex;
     public TableType tableType = TableType.TABLE;
     public TapPermissions tapPermissions;
+    public Boolean apiCreated;
+    
+    /**
+     * Identifier for use when the table data (rows) are temporarily
+     * stored someplace other than in the database. Use case: TAP upload
+     * where the rows are stored temporarily and loaded later by an external
+     * process.
+     */
+    public transient TableLocationInfo dataLocation;
+    
+    public static class TableLocationInfo {
+        // keys are implementation-specific internal communication between the 
+        // UploadManager: storeTable can create an instance to describe where/how
+        // it stored the table if not in the database and ready to query
+        public final Map<String,URI> map = new TreeMap<>();
+    }
     
     public enum TableType {
         TABLE("table"),
@@ -113,8 +131,7 @@ public class TableDesc
         }
     }
 
-    public TableDesc(String schemaName, String tableName) 
-    {
+    public TableDesc(String schemaName, String tableName) {
         TapSchema.assertNotNull(TableDesc.class, "schemaName", schemaName);
         TapSchema.assertNotNull(TableDesc.class, "tableName", tableName);
         this.schemaName = schemaName;
@@ -125,8 +142,7 @@ public class TableDesc
         this.schemaName = schemaName;
     }
 
-    public String getSchemaName()
-    {
+    public String getSchemaName() {
         return schemaName;
     }
 
@@ -134,33 +150,28 @@ public class TableDesc
         this.tableName = tableName;
     }
 
-    public String getTableName()
-    {
+    public String getTableName() {
         return tableName;
     }
 
-    public List<ColumnDesc> getColumnDescs()
-    {
+    public List<ColumnDesc> getColumnDescs() {
         return columnDescs;
     }
     
-    public ColumnDesc getColumn(String name)
-    {
-        for (ColumnDesc cd : columnDescs)
-        {
-            if (cd.getColumnName().equalsIgnoreCase(name))
+    public ColumnDesc getColumn(String name) {
+        for (ColumnDesc cd : columnDescs) {
+            if (cd.getColumnName().equalsIgnoreCase(name)) {
                 return cd;
+            }
         }
         return null;
     }
 
-    public List<KeyDesc> getKeyDescs()
-    {
+    public List<KeyDesc> getKeyDescs() {
         return keyDescs;
     }
 
-    public String toString()
-    {
+    public String toString() {
         StringBuilder sb = new StringBuilder();
         sb.append("Table[");
         sb.append(schemaName == null ? "" : schemaName).append(",");
@@ -168,12 +179,14 @@ public class TableDesc
         sb.append(description == null ? "" : description).append(",");
         sb.append(utype == null ? "" : utype).append(",");
         sb.append("columns[");
-        for (ColumnDesc col : columnDescs)
+        for (ColumnDesc col : columnDescs) {
             sb.append(col).append("|");
+        }
         sb.append("],");
         sb.append("keys[");
-        for (KeyDesc key:  keyDescs)
+        for (KeyDesc key:  keyDescs) {
             sb.append(key).append("|");
+        }
         sb.append("]]");
         return sb.toString();
     }

@@ -3,7 +3,7 @@
  *******************  CANADIAN ASTRONOMY DATA CENTRE  *******************
  **************  CENTRE CANADIEN DE DONNÉES ASTRONOMIQUES  **************
  *
- *  (c) 2019.                            (c) 2019.
+ *  (c) 2025.                            (c) 2025.
  *  Government of Canada                 Gouvernement du Canada
  *  National Research Council            Conseil national de recherches
  *  Ottawa, Canada, K1A 0R6              Ottawa, Canada, K1A 0R6
@@ -71,18 +71,11 @@ package ca.nrc.cadc.tap.schema;
 
 import ca.nrc.cadc.auth.AuthenticationUtil;
 import ca.nrc.cadc.auth.IdentityManager;
-import ca.nrc.cadc.cred.client.CredUtil;
 import ca.nrc.cadc.db.DatabaseTransactionManager;
 import ca.nrc.cadc.net.ResourceNotFoundException;
 import ca.nrc.cadc.profiler.Profiler;
-import ca.nrc.cadc.reg.Standards;
-import ca.nrc.cadc.reg.client.LocalAuthority;
 import ca.nrc.cadc.uws.Job;
-
 import java.net.URI;
-import java.security.AccessControlException;
-import java.security.cert.CertificateExpiredException;
-import java.security.cert.CertificateNotYetValidException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -92,13 +85,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
-
 import javax.security.auth.Subject;
 import javax.sql.DataSource;
 import org.apache.log4j.Logger;
-import org.opencadc.gms.GroupClient;
 import org.opencadc.gms.GroupURI;
-import org.opencadc.gms.GroupUtil;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.PreparedStatementCreator;
 import org.springframework.jdbc.core.RowMapper;
@@ -109,7 +99,7 @@ import org.springframework.jdbc.core.RowMapper;
  * modified in a subclass as long as the change(s) are made before the get
  * method is called (*TableName variables).
  */
-public class TapSchemaDAO {
+public class TapSchemaDAO extends AbstractDAO {
     
     private static final Logger log = Logger.getLogger(TapSchemaDAO.class);
 
@@ -118,7 +108,7 @@ public class TapSchemaDAO {
      * is expected to be appended to the tap_schema table names so that two versions
      * of the tap_schema tables can co-exist.
      */
-    protected final int TAP_VERSION = 11;
+    protected static final int TAP_VERSION = 11;
 
     // standard tap_schema table names
     protected String schemasTableName = "tap_schema.schemas" + TAP_VERSION;
@@ -127,15 +117,16 @@ public class TapSchemaDAO {
     protected String keysTableName = "tap_schema.keys" + TAP_VERSION;
     protected String keyColumnsTableName = "tap_schema.key_columns" + TAP_VERSION;
 
-    private String[] tsSchemaCols = new String[] { "description", "utype", "schema_index", "schema_name" };
+    private String[] tsSchemaCols = new String[] { 
+        "description", "utype", "schema_index", "api_created", "schema_name" };
     protected String orderSchemaClause = " ORDER BY schema_name";
 
-    private String[] tsTablesCols = new String[] { "table_type", "description", "utype", "table_index", "schema_name",
-            "table_name" };
+    private String[] tsTablesCols = new String[] { 
+        "schema_name", "table_type", "description", "utype", "table_index", "api_created", "table_name" };
     protected String orderTablesClause = " ORDER BY schema_name,table_index,table_name";
 
     private String[] tsColumnsCols = new String[] { "description", "utype", "ucd", "unit", "datatype", "arraysize",
-            "xtype", "principal", "indexed", "std", "id", "column_index", "table_name", "column_name" };
+        "xtype", "principal", "indexed", "std", "column_id", "column_index", "table_name", "column_name" };
     protected String orderColumnsClause = " ORDER BY table_name,column_index,column_name";
 
     private String[] tsKeysCols = new String[] { "key_id", "from_table", "target_table", "description,utype" };
@@ -153,26 +144,22 @@ public class TapSchemaDAO {
     private static String[] accessControlCols = new String[] { ownerCol, readAnonCol, readOnlyCol, readWriteCol };
 
     protected Job job;
-    protected DataSource dataSource;
     private boolean ordered;
     private boolean useIntegerForBoolean = true;
 
     // Indicates function return datatype matches argument datatype.
     public static final String ARGUMENT_DATATYPE = "ARGUMENT_DATATYPE";
 
-    public static final int MIN_DEPTH = 0; // schema and tables only
-    public static final int MAX_DEPTH = 1; // columns, keys, etc
+    public static final int MIN_DEPTH = 0; // schema only
+    public static final int TAB_DEPTH = 1; // +tables
+    public static final int MAX_DEPTH = 2; // +columns, keys, etc
 
     /**
      * Construct a new TapSchemaDAO.
      */
     public TapSchemaDAO() {
     }
-
-    public void setDataSource(DataSource dataSource) {
-        this.dataSource = dataSource;
-    }
-
+    
     public void setJob(Job job) {
         this.job = job;
     }
@@ -201,64 +188,61 @@ public class TapSchemaDAO {
      * content in TAP_SCHEMA. This method filters output based on what the current
      * Subject (user) is allowed to see.
      * 
-     * @param depth
-     *            use MIN_DEPTH to get schema and table names only, MAX_DEPTH to get
-     *            everything
+     * @param depth in [0,2] where 0 is schema only, 1 is schema(s)+table(s), 2 is everything
      * @return TapSchema containing some or all of the content
      */
     public TapSchema get(int depth) {
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
-        // List of TAP_SCHEMA.schemas
+        IdentityManager identityManager = AuthenticationUtil.getIdentityManager();
+        log.debug("IdentityManager: " + identityManager);
+        TapPermissionsMapper tapPermissionsMapper = new TapPermissionsMapper(identityManager);
+        
+        // TAP_SCHEMA.schemas
         GetSchemasStatement gss = new GetSchemasStatement(schemasTableName);
         if (ordered) {
             gss.setOrderBy(orderSchemaClause);
         }
-        IdentityManager identityManager = AuthenticationUtil.getIdentityManager();
-        log.debug("IdentityManager: " + identityManager);
-        TapPermissionsMapper tapPermissionsMapper = new TapPermissionsMapper(identityManager);
         List<SchemaDesc> schemaDescs = jdbc.query(gss, new SchemaMapper(tapPermissionsMapper));
 
-        // TAP_SCHEMA.tables
-        GetTablesStatement gts = new GetTablesStatement(tablesTableName);
-        if (ordered) {
-            gts.setOrderBy(orderTablesClause);
-        }
-        List<TableDesc> tableDescs = jdbc.query(gts, new TableMapper(tapPermissionsMapper));
-
-        // Add the Tables to the Schemas.
-        addTablesToSchemas(schemaDescs, tableDescs);
-
-        // TAP_SCHEMA.columns
         if (depth > MIN_DEPTH) {
-            GetColumnsStatement gcs = new GetColumnsStatement(columnsTableName);
+            // TAP_SCHEMA.tables
+            GetTablesStatement gts = new GetTablesStatement(tablesTableName);
             if (ordered) {
-                gcs.setOrderBy(orderColumnsClause);
+                gts.setOrderBy(orderTablesClause);
             }
-            List<ColumnDesc> columnDescs = jdbc.query(gcs, new ColumnMapper());
+            List<TableDesc> tableDescs = jdbc.query(gts, new TableMapper(tapPermissionsMapper));
+            addTablesToSchemas(schemaDescs, tableDescs);
 
-            // Add the Columns to the Tables.
-            addColumnsToTables(tableDescs, columnDescs);
+            if (depth > TAB_DEPTH) {
+                // TAP_SCHEMA.columns
+                GetColumnsStatement gcs = new GetColumnsStatement(columnsTableName);
+                if (ordered) {
+                    gcs.setOrderBy(orderColumnsClause);
+                }
+                List<ColumnDesc> columnDescs = jdbc.query(gcs, new ColumnMapper());
+                addColumnsToTables(tableDescs, columnDescs);
 
-            // List of TAP_SCHEMA.keys
-            GetKeysStatement gks = new GetKeysStatement(keysTableName);
-            if (ordered) {
-                gks.setOrderBy(orderKeysClause);
+                // TAP_SCHEMA.keys
+                GetKeysStatement gks = new GetKeysStatement(keysTableName);
+                if (ordered) {
+                    gks.setOrderBy(orderKeysClause);
+                }
+                List<KeyDesc> keyDescs = jdbc.query(gks, new KeyMapper());
+
+                // TAP_SCHEMA.key_columns
+                GetKeyColumnsStatement gkcs = new GetKeyColumnsStatement(keyColumnsTableName);
+                if (ordered) {
+                    gkcs.setOrderBy(orderKeyColumnsClause);
+                }
+                List<KeyColumnDesc> keyColumnDescs = jdbc.query(gkcs, new KeyColumnMapper());
+
+                // Add the KeyColumns to the Keys.
+                addKeyColumnsToKeys(keyDescs, keyColumnDescs);
+
+                // connect foreign keys to the fromTable
+                addForeignKeys(schemaDescs, keyDescs);
             }
-            List<KeyDesc> keyDescs = jdbc.query(gks, new KeyMapper());
-
-            // TAP_SCHEMA.key_columns
-            GetKeyColumnsStatement gkcs = new GetKeyColumnsStatement(keyColumnsTableName);
-            if (ordered) {
-                gkcs.setOrderBy(orderKeyColumnsClause);
-            }
-            List<KeyColumnDesc> keyColumnDescs = jdbc.query(gkcs, new KeyColumnMapper());
-
-            // Add the KeyColumns to the Keys.
-            addKeyColumnsToKeys(keyDescs, keyColumnDescs);
-
-            // connect foreign keys to the fromTable
-            addForeignKeys(schemaDescs, keyDescs);
         }
 
         TapSchema ret = new TapSchema();
@@ -271,24 +255,38 @@ public class TapSchemaDAO {
      * Get schema description (shallow).
      * 
      * @param schemaName
-     * @return
+     * @param depth 0 for schema, 1 for schema+tables, 2 for everything
+     * @return specified SchemaDesc or null
      */
-    public SchemaDesc getSchema(String schemaName, boolean shallow) {
-        if (!shallow) {
-            throw new UnsupportedOperationException("getSchema(shallow=false) not implemented");
-        }
-
+    public SchemaDesc getSchema(String schemaName, int depth) {
         GetSchemasStatement gss = new GetSchemasStatement(schemasTableName);
         gss.setSchemaName(schemaName);
+        IdentityManager identityManager = AuthenticationUtil.getIdentityManager();
+        log.debug("IdentityManager: " + identityManager);
+        TapPermissionsMapper tapPermissionsMapper = new TapPermissionsMapper(identityManager);
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
-        List<SchemaDesc> schemaDescs = jdbc.query(gss, new SchemaMapper(null));
+        List<SchemaDesc> schemaDescs = jdbc.query(gss, new SchemaMapper(tapPermissionsMapper));
         if (schemaDescs.isEmpty()) {
             return null;
         }
+        SchemaDesc ret = null;
         if (schemaDescs.size() == 1) {
-            return schemaDescs.get(0);
+            ret = schemaDescs.get(0);
+        } else {
+            throw new RuntimeException("BUG: found " + schemaDescs.size() + " schema matching " + schemaName);
         }
-        throw new RuntimeException("BUG: found " + schemaDescs.size() + " schema matching " + schemaName);
+        if (depth > MIN_DEPTH) {
+            // TAP_SCHEMA.tables
+            GetTablesStatement gts = new GetTablesStatement(tablesTableName);
+            gts.setSchemaName(schemaName);
+            if (ordered) {
+                gts.setOrderBy(orderTablesClause);
+            }
+            List<TableDesc> tableDescs = jdbc.query(gts, new TableMapper(tapPermissionsMapper));
+            addTablesToSchemas(schemaDescs, tableDescs);
+        }
+        
+        return ret;
     }
 
     /**
@@ -298,18 +296,17 @@ public class TapSchemaDAO {
      * @return table description or null if not found
      */
     public TableDesc getTable(String tableName) {
-        return getTable(tableName, false);
+        return getTable(tableName, MAX_DEPTH);
     }
 
     /**
      * Get table description.
      * 
      * @param tableName
-     * @param shallow
-     *            true to only the table metadata
+     * @param depth
      * @return
      */
-    public TableDesc getTable(String tableName, boolean shallow) {
+    public TableDesc getTable(String tableName, int depth) {
         final Profiler prof = new Profiler(TapSchemaDAO.class);
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
 
@@ -325,40 +322,38 @@ public class TapSchemaDAO {
         TableDesc ret = tableDescs.get(0);
         prof.checkpoint("get-table");
 
-        if (shallow) {
-            return ret;
-        }
+        if (depth > TAB_DEPTH) {
+            // TAP_SCHEMA.columns
+            GetColumnsStatement gcs = new GetColumnsStatement(columnsTableName);
+            gcs.setTableName(tableName);
+            if (ordered) {
+                gcs.setOrderBy(orderColumnsClause);
+            }
+            List<ColumnDesc> columnDescs = jdbc.query(gcs, new ColumnMapper());
+            ret.getColumnDescs().addAll(columnDescs);
+            prof.checkpoint("get-columns");
 
-        // column metadata
-        GetColumnsStatement gcs = new GetColumnsStatement(columnsTableName);
-        gcs.setTableName(tableName);
-        if (ordered) {
-            gcs.setOrderBy(orderColumnsClause);
-        }
-        List<ColumnDesc> columnDescs = jdbc.query(gcs, new ColumnMapper());
-        ret.getColumnDescs().addAll(columnDescs);
-        prof.checkpoint("get-columns");
+            // foreign keys
+            GetKeysStatement gks = new GetKeysStatement(keysTableName);
+            gks.setTableName(tableName);
+            if (ordered) {
+                gks.setOrderBy(orderKeysClause);
+            }
+            List<KeyDesc> keyDescs = jdbc.query(gks, new KeyMapper());
+            prof.checkpoint("get-keys");
 
-        // foreign keys
-        GetKeysStatement gks = new GetKeysStatement(keysTableName);
-        gks.setTableName(tableName);
-        if (ordered) {
-            gks.setOrderBy(orderKeysClause);
-        }
-        List<KeyDesc> keyDescs = jdbc.query(gks, new KeyMapper());
-        prof.checkpoint("get-keys");
+            // TAP_SCHEMA.key_columns
+            GetKeyColumnsStatement gkcs = new GetKeyColumnsStatement(keyColumnsTableName);
+            gkcs.setKeyDescs(keyDescs); // get keys for tableName only
+            if (ordered) {
+                gkcs.setOrderBy(orderKeyColumnsClause);
+            }
+            List<KeyColumnDesc> keyColumnDescs = jdbc.query(gkcs, new KeyColumnMapper());
+            prof.checkpoint("get-key-columns");
 
-        // TAP_SCHEMA.key_columns
-        GetKeyColumnsStatement gkcs = new GetKeyColumnsStatement(keyColumnsTableName);
-        gkcs.setKeyDescs(keyDescs); // get keys for tableName only
-        if (ordered) {
-            gkcs.setOrderBy(orderKeyColumnsClause);
+            addKeyColumnsToKeys(keyDescs, keyColumnDescs);
+            ret.getKeyDescs().addAll(keyDescs);
         }
-        List<KeyColumnDesc> keyColumnDescs = jdbc.query(gkcs, new KeyColumnMapper());
-        prof.checkpoint("get-key-columns");
-
-        addKeyColumnsToKeys(keyDescs, keyColumnDescs);
-        ret.getKeyDescs().addAll(keyDescs);
 
         log.debug("found: " + ret);
         prof.checkpoint("get-table-done");
@@ -390,11 +385,29 @@ public class TapSchemaDAO {
                 "BUG: found " + columnDescs.size() + " columns matching " + tableName + " " + columnName);
     }
 
+    public static void checkMismatchedColumnSet(TableDesc cur, TableDesc td) {
+        // detect mismatched column list
+        Set<String> curCols = new TreeSet<>();
+        for (ColumnDesc cd : cur.getColumnDescs()) {
+            log.debug("update: cur = " + cd.getColumnName());
+            curCols.add(cd.getColumnName());
+        }
+        Set<String> tdCols = new TreeSet<>();
+        for (ColumnDesc cd : td.getColumnDescs()) {
+            log.debug("update: td = " + cd.getColumnName());
+            tdCols.add(cd.getColumnName());
+        }
+        log.debug("update: " + curCols.size() + " vs " + tdCols.size());
+        if (curCols.size() != tdCols.size() || !curCols.containsAll(tdCols) || !tdCols.containsAll(curCols)) {
+            throw new UnsupportedOperationException("cannot add/remove/rename columns");
+        }
+    }
+
     public void put(SchemaDesc sd) {
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         DatabaseTransactionManager tm = new DatabaseTransactionManager(dataSource);
         try {
-            SchemaDesc cur = getSchema(sd.getSchemaName(), true);
+            SchemaDesc cur = getSchema(sd.getSchemaName(), 0);
             boolean update = (cur != null);
             tm.startTransaction();
 
@@ -444,33 +457,13 @@ public class TapSchemaDAO {
         DatabaseTransactionManager tm = new DatabaseTransactionManager(dataSource);
         try {
             TableDesc cur = getTable(td.getTableName());
-            boolean update = (cur != null);
-            if (update) {
-                // TODO: check assumption/limitation that all columns in td are also in cur
-                Set<String> curCols = new TreeSet<String>();
-                for (ColumnDesc cd : cur.getColumnDescs()) {
-                    log.debug("update: cur = " + cd.getColumnName());
-                    curCols.add(cd.getColumnName());
-                }
-                Set<String> tdCols = new TreeSet<String>();
-                for (ColumnDesc cd : td.getColumnDescs()) {
-                    log.debug("update: td = " + cd.getColumnName());
-                    tdCols.add(cd.getColumnName());
-                }
-                log.debug("update: " + curCols.size() + " vs " + tdCols.size());
-                if (curCols.size() != tdCols.size() || !curCols.containsAll(tdCols) || !tdCols.containsAll(curCols)) {
-                    throw new UnsupportedOperationException("cannot add/remove/rename columns");
-                }
-
-                for (ColumnDesc cd : cur.getColumnDescs()) {
-                    ColumnDesc ncd = td.getColumn(cd.getColumnName());
-                    if (!cd.getDatatype().equals(ncd.getDatatype())) {
-                        throw new UnsupportedOperationException("cannot change column type: " + cd.getColumnName() + " "
-                                + cd.getDatatype() + " -> " + ncd.getDatatype());
-                    }
-                }
+            final boolean update = (cur != null);
+            
+            if (cur != null) {
+                // add/remove/rename columns not supported
+                checkMismatchedColumnSet(cur, td);
             }
-
+            
             tm.startTransaction();
             prof.checkpoint("start-transaction");
 
@@ -480,7 +473,7 @@ public class TapSchemaDAO {
             jdbc.update(pts);
             prof.checkpoint("put-table");
 
-            // add/remove columns not supported so udpate flag is same for the table and
+            // add/remove/rename columns not supported so update flag is same for the table and
             // column(s)
             PutColumnStatement pcs = new PutColumnStatement(update);
             for (ColumnDesc cd : td.getColumnDescs()) {
@@ -580,6 +573,54 @@ public class TapSchemaDAO {
         }
     }
 
+    public void deleteSchema(String schemaName) {
+        final Profiler prof = new Profiler(TapSchemaDAO.class);
+        JdbcTemplate jdbc = new JdbcTemplate(dataSource);
+        DatabaseTransactionManager tm = new DatabaseTransactionManager(dataSource);
+        try {
+            SchemaDesc cur = getSchema(schemaName, TAB_DEPTH);
+            if (cur == null) {
+                throw new ResourceNotFoundException("not found: " + schemaName);
+            }
+            if (!cur.getTableDescs().isEmpty()) {
+                throw new UnsupportedOperationException("cannot delete " + schemaName
+                    + " reason: it contains " + cur.getTableDescs().size() + " tables");
+            }
+            
+            tm.startTransaction();
+            prof.checkpoint("start-transaction");
+            DeleteSchemaStatement dss = new DeleteSchemaStatement();
+            dss.setSchema(cur);
+            jdbc.update(dss);
+            prof.checkpoint("delete-schema");
+            
+            tm.commitTransaction();
+        } catch (Exception ex) {
+            try {
+                log.error("DELETE failed - rollback", ex);
+                tm.rollbackTransaction();
+                prof.checkpoint("rollback-transaction");
+                log.error("DELETE failed - rollback: OK");
+            } catch (Exception oops) {
+                log.error("DELETE failed - rollback : FAIL", oops);
+            }
+            // TODO: categorise failures better
+            throw new RuntimeException("failed to delete " + schemaName, ex);
+        } finally {
+            if (tm.isOpen()) {
+                log.error("BUG: open transaction in finally - trying to rollback");
+                try {
+                    tm.rollbackTransaction();
+                    prof.checkpoint("rollback-transaction");
+                    log.error("BUG: rollback in finally: OK");
+                } catch (Exception oops) {
+                    log.error("BUG: rollback in finally: FAIL", oops);
+                }
+                throw new RuntimeException("BUG: open transaction in finally");
+            }
+        }
+    }
+
     /**
      * Delete a table. This also deletes columns and keys associated with the table.
      * 
@@ -591,7 +632,7 @@ public class TapSchemaDAO {
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         DatabaseTransactionManager tm = new DatabaseTransactionManager(dataSource);
         try {
-            TableDesc cur = getTable(tableName, true);
+            TableDesc cur = getTable(tableName, MAX_DEPTH);
             if (cur == null) {
                 throw new ResourceNotFoundException("not found: " + tableName);
             }
@@ -694,16 +735,23 @@ public class TapSchemaDAO {
     }
 
     /**
-     * Set the permissions of the schema identified by schemaName.
-     * 
-     * See the javadoc in TapPermissions for how null values of the permissions
-     * field are handled.
+     * Set the permissions of the schema identified by schemaName. See TapPermissions 
+     * for how null values of the permissions field are handled.
      * 
      * @param schemaName
      * @param tp
      * @throws ResourceNotFoundException
      */
     public void setSchemaPermissions(String schemaName, TapPermissions tp) throws ResourceNotFoundException {
+        if (tp.owner != null) {
+            IdentityManager im = AuthenticationUtil.getIdentityManager();
+            tp.ownerID = im.toOwner(tp.owner);
+            // allow clear permissions but detectn failure to extract owner ident
+            if (!tp.owner.getPrincipals().isEmpty() && tp.ownerID == null) {
+                throw new UnsupportedOperationException("unable to map schema owner '"
+                        + im.toDisplayString(tp.owner) + "' to a persistent owner object using " + im.getClass().getName());
+            }
+        }
         PutPermissionsStatement ssp = new PutPermissionsStatement(schemasTableName, "schema_name", schemaName, tp);
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
         int rows = jdbc.update(ssp);
@@ -716,17 +764,23 @@ public class TapSchemaDAO {
     }
 
     /**
-     * Set the permissions of the schema identified by tableName.
-     * 
-     * See the javadoc in TapPermissions for how null values of the permissions
-     * field are handled.
+     * Set the permissions of the schema identified by tableName. See TapPermissions 
+     * for how null values of the permissions field are handled.
      * 
      * @param tableName
      * @param tp
      * @throws ResourceNotFoundException
      */
     public void setTablePermissions(String tableName, TapPermissions tp) throws ResourceNotFoundException {
-
+        if (tp.owner != null) {
+            IdentityManager im = AuthenticationUtil.getIdentityManager();
+            tp.ownerID = im.toOwner(tp.owner);
+            // allow clear permissions but detectn failure to extract owner ident
+            if (!tp.owner.getPrincipals().isEmpty() && tp.ownerID == null) {
+                throw new UnsupportedOperationException("unable to map schema owner '"
+                        + im.toDisplayString(tp.owner) + "' to a persistent owner object using " + im.getClass().getName());
+            }
+        }
         // update tables permissions
         PutPermissionsStatement stp = new PutPermissionsStatement(tablesTableName, "table_name", tableName, tp);
         JdbcTemplate jdbc = new JdbcTemplate(dataSource);
@@ -762,12 +816,12 @@ public class TapSchemaDAO {
     }
 
     private class GetSchemasStatement implements PreparedStatementCreator {
-        private String tap_schema_tab;
+        private String schemasTab;
         private String schemaName;
         private String orderBy;
 
-        public GetSchemasStatement(String tap_schema_tab) {
-            this.tap_schema_tab = tap_schema_tab;
+        public GetSchemasStatement(String schemasTab) {
+            this.schemasTab = schemasTab;
         }
 
         public void setSchemaName(String schemaName) {
@@ -783,7 +837,7 @@ public class TapSchemaDAO {
             StringBuilder sb = new StringBuilder();
             sb.append("SELECT ").append(toCommaList(tsSchemaCols, 0));
             sb.append(",").append(toCommaList(accessControlCols, 0));
-            sb.append(" FROM ").append(tap_schema_tab);
+            sb.append(" FROM ").append(schemasTab);
 
             if (schemaName != null) {
                 sb.append(" WHERE schema_name = ?");
@@ -807,12 +861,17 @@ public class TapSchemaDAO {
     }
 
     private class GetTablesStatement implements PreparedStatementCreator {
-        private String tap_schema_tab;
+        private String tablesTab;
+        private String schemaName;
         private String tableName;
         private String orderBy;
 
-        public GetTablesStatement(String tap_schema_tab) {
-            this.tap_schema_tab = tap_schema_tab;
+        public GetTablesStatement(String tablesTab) {
+            this.tablesTab = tablesTab;
+        }
+
+        public void setSchemaName(String schemaName) {
+            this.schemaName = schemaName;
         }
 
         public void setTableName(String tableName) {
@@ -827,10 +886,15 @@ public class TapSchemaDAO {
             StringBuilder sb = new StringBuilder();
             sb.append("SELECT ").append(toCommaList(tsTablesCols, 0));
             sb.append(",").append(toCommaList(accessControlCols, 0));
-            sb.append(" FROM ").append(tap_schema_tab);
+            sb.append(" FROM ").append(tablesTab);
 
+            String wa = " WHERE";
+            if (schemaName != null) {
+                sb.append(wa).append(" schema_name = ?");
+                wa = " AND";
+            }
             if (tableName != null) {
-                sb.append(" WHERE table_name = ?");
+                sb.append(wa).append(" table_name = ?");
             }
             if (orderBy != null) {
                 sb.append(orderBy);
@@ -845,6 +909,10 @@ public class TapSchemaDAO {
             PreparedStatement prep = conn.prepareStatement(sql);
             int paramIndex = 1;
 
+            if (schemaName != null) {
+                prep.setString(paramIndex++, schemaName);
+                vals.append(schemaName);
+            }
             if (tableName != null) {
                 prep.setString(paramIndex++, tableName);
                 vals.append(tableName);
@@ -855,13 +923,13 @@ public class TapSchemaDAO {
     }
 
     private class GetColumnsStatement implements PreparedStatementCreator {
-        private String tap_schema_tab;
+        private String columnsTab;
         private String tableName;
         private String columnName;
         private String orderBy;
 
-        public GetColumnsStatement(String tap_schema_tab) {
-            this.tap_schema_tab = tap_schema_tab;
+        public GetColumnsStatement(String columnsTab) {
+            this.columnsTab = columnsTab;
         }
 
         public void setTableName(String tableName) {
@@ -879,7 +947,7 @@ public class TapSchemaDAO {
         public PreparedStatement createPreparedStatement(Connection conn) throws SQLException {
             StringBuilder sb = new StringBuilder();
             sb.append("SELECT ").append(toCommaList(tsColumnsCols, 0));
-            sb.append(" FROM ").append(tap_schema_tab);
+            sb.append(" FROM ").append(columnsTab);
 
             if (tableName != null) {
                 sb.append(" WHERE table_name = ?");
@@ -908,12 +976,12 @@ public class TapSchemaDAO {
     }
 
     private class GetKeysStatement implements PreparedStatementCreator {
-        private String tap_schema_tab;
+        private String keysTab;
         private String tableName;
         private String orderBy;
 
-        public GetKeysStatement(String tap_schema_tab) {
-            this.tap_schema_tab = tap_schema_tab;
+        public GetKeysStatement(String keysTab) {
+            this.keysTab = keysTab;
         }
 
         public void setTableName(String tableName) {
@@ -927,7 +995,7 @@ public class TapSchemaDAO {
         public PreparedStatement createPreparedStatement(Connection conn) throws SQLException {
             StringBuilder sb = new StringBuilder();
             sb.append("SELECT ").append(toCommaList(tsKeysCols, 0));
-            sb.append(" FROM ").append(tap_schema_tab);
+            sb.append(" FROM ").append(keysTab);
             if (tableName != null) {
                 sb.append(" WHERE from_table = ?");
             } else if (orderBy != null) {
@@ -946,12 +1014,12 @@ public class TapSchemaDAO {
     }
 
     private class GetKeyColumnsStatement implements PreparedStatementCreator {
-        private String tap_schema_tab;
+        private String keyColumnsTab;
         private List<KeyDesc> keyDescs;
         private String orderBy;
 
-        public GetKeyColumnsStatement(String tap_schema_tab) {
-            this.tap_schema_tab = tap_schema_tab;
+        public GetKeyColumnsStatement(String keyColumnsTab) {
+            this.keyColumnsTab = keyColumnsTab;
         }
 
         public void setKeyDescs(List<KeyDesc> keyDescs) {
@@ -965,7 +1033,7 @@ public class TapSchemaDAO {
         public PreparedStatement createPreparedStatement(Connection conn) throws SQLException {
             StringBuilder sb = new StringBuilder();
             sb.append("SELECT ").append(toCommaList(tsKeyColumnsCols, 0));
-            sb.append(" FROM ").append(tap_schema_tab);
+            sb.append(" FROM ").append(keyColumnsTab);
 
             if (keyDescs != null && !keyDescs.isEmpty()) {
                 sb.append(" WHERE key_id IN (");
@@ -1039,6 +1107,7 @@ public class TapSchemaDAO {
             this.tp = tp;
         }
 
+        @Override
         public PreparedStatement createPreparedStatement(Connection conn) throws SQLException {
             StringBuilder sb = new StringBuilder();
             int colIndex = 1;
@@ -1060,17 +1129,8 @@ public class TapSchemaDAO {
             StringBuilder vals = new StringBuilder();
             vals.append("values: ");
 
-            IdentityManager identityManager = AuthenticationUtil.getIdentityManager();
-            if (identityManager == null) {
-                throw new IllegalStateException(
-                        "failed to load IdentityManager implementation - cannot update permissions");
-            }
-            log.debug("IdentityManager: " + identityManager);
-            Subject owner = tp.owner;
-            Object ownerVal = identityManager.toOwner(owner);
-
-            if (ownerVal != null) {
-                safeSetString(vals, prep, colIndex++, ownerVal.toString());
+            if (tp.ownerID != null) {
+                safeSetString(vals, prep, colIndex++, tp.ownerID.toString());
             } else {
                 safeSetString(vals, prep, colIndex++, null);
             }
@@ -1122,12 +1182,13 @@ public class TapSchemaDAO {
             log.debug(sql);
             PreparedStatement ps = conn.prepareStatement(sql);
 
-            // load values: description, utype, schema_index, schema_name
+            // load values: description, utype, schema_index, schema_name, api_created
             sb = new StringBuilder();
             int col = 1;
             safeSetString(sb, ps, col++, schema.description);
             safeSetString(sb, ps, col++, schema.utype);
-            safeSetInteger(sb, ps, col++, schema.schema_index);
+            safeSetInteger(sb, ps, col++, schema.schemaIndex);
+            safeSetBoolean(sb, ps, col++, schema.apiCreated);
             safeSetString(sb, ps, col++, schema.getSchemaName());
 
             return ps;
@@ -1152,11 +1213,11 @@ public class TapSchemaDAO {
             if (update) {
                 sb.append("UPDATE ").append(tablesTableName);
                 sb.append(" SET (");
-                sb.append(toCommaList(tsTablesCols, 2));
+                sb.append(toCommaList(tsTablesCols, 1));
                 sb.append(") = (");
-                sb.append(toParamList(tsTablesCols, 2));
+                sb.append(toParamList(tsTablesCols, 1));
                 sb.append(")");
-                sb.append(" WHERE schema_name=? AND table_name=?");
+                sb.append(" WHERE table_name=?");
             } else {
                 sb.append("INSERT INTO ").append(tablesTableName);
                 sb.append(" (");
@@ -1169,14 +1230,15 @@ public class TapSchemaDAO {
             log.debug(sql);
             PreparedStatement ps = conn.prepareStatement(sql);
 
-            // load values: description, utype, schema_name, table_name
+            // load values: description, utype, schema_name, table_name, api_created
             sb = new StringBuilder();
             int col = 1;
+            safeSetString(sb, ps, col++, table.getSchemaName());
             safeSetString(sb, ps, col++, table.tableType.getValue());
             safeSetString(sb, ps, col++, table.description);
             safeSetString(sb, ps, col++, table.utype);
             safeSetInteger(sb, ps, col++, table.tableIndex);
-            safeSetString(sb, ps, col++, table.getSchemaName());
+            safeSetBoolean(sb, ps, col++, table.apiCreated);
             safeSetString(sb, ps, col++, table.getTableName());
 
             return ps;
@@ -1219,7 +1281,7 @@ public class TapSchemaDAO {
             PreparedStatement ps = conn.prepareStatement(sql);
 
             // description, utype, ucd, unit, datatype, arraysize, xtype, principal,
-            // indexed, std, id,
+            // indexed, std, column_id,
             // table_name, column_name
             sb = new StringBuilder();
             int col = 1;
@@ -1233,8 +1295,8 @@ public class TapSchemaDAO {
             safeSetBoolean(sb, ps, col++, column.principal);
             safeSetBoolean(sb, ps, col++, column.indexed);
             safeSetBoolean(sb, ps, col++, column.std);
-            safeSetString(sb, ps, col++, column.id);
-            safeSetInteger(sb, ps, col++, column.column_index);
+            safeSetString(sb, ps, col++, column.columnID);
+            safeSetInteger(sb, ps, col++, column.columnIndex);
             safeSetString(sb, ps, col++, column.getTableName());
             safeSetString(sb, ps, col++, column.getColumnName());
             log.debug("values: " + sb.toString());
@@ -1243,6 +1305,31 @@ public class TapSchemaDAO {
         }
     }
 
+    private class DeleteSchemaStatement implements PreparedStatementCreator {
+        private SchemaDesc schema;
+
+        public void setSchema(SchemaDesc schema) {
+            this.schema = schema;
+        }
+
+        @Override
+        public PreparedStatement createPreparedStatement(Connection conn) throws SQLException {
+            StringBuilder sb = new StringBuilder();
+            sb.append("DELETE FROM ").append(schemasTableName);
+            sb.append(" WHERE schema_name=?");
+            String sql = sb.toString();
+            log.debug(sql);
+            PreparedStatement ps = conn.prepareStatement(sql);
+
+            sb = new StringBuilder();
+            int col = 1;
+            safeSetString(sb, ps, col++, schema.getSchemaName());
+            log.debug("values: " + sb.toString());
+
+            return ps;
+        }
+    }
+    
     private class DeleteTableStatement implements PreparedStatementCreator {
         private TableDesc table;
 
@@ -1515,7 +1602,9 @@ public class TapSchemaDAO {
 
             schemaDesc.description = rs.getString("description");
             schemaDesc.utype = rs.getString("utype");
-
+            schemaDesc.schemaIndex = rs.getInt("schema_index");
+            schemaDesc.apiCreated = rs.getInt("api_created") == 1;
+            
             if (tapPermissionsMapper != null) {
                 schemaDesc.tapPermissions = tapPermissionsMapper.mapRow(rs, rowNum);
             }
@@ -1542,11 +1631,13 @@ public class TapSchemaDAO {
             tableDesc.tableType = TableDesc.TableType.toValue(rs.getString("table_type"));
             tableDesc.description = rs.getString("description");
             tableDesc.utype = rs.getString("utype");
-
+            tableDesc.tableIndex = rs.getInt("table_index");
+            tableDesc.apiCreated = rs.getInt("api_created") == 1;
+            
             if (tapPermissionsMapper != null) {
                 tableDesc.tapPermissions = tapPermissionsMapper.mapRow(rs, rowNum);
             }
-
+            
             return tableDesc;
         }
     }
@@ -1575,14 +1666,16 @@ public class TapSchemaDAO {
             col.principal = intToBoolean(rs.getInt("principal"));
             col.indexed = intToBoolean(rs.getInt("indexed"));
             col.std = intToBoolean(rs.getInt("std"));
-            col.id = rs.getString("id");
-
+            col.columnID = rs.getString("column_id");
+            col.columnIndex = rs.getInt("column_index");
+            
             return col;
         }
 
         private boolean intToBoolean(Integer i) {
-            if (i == null)
+            if (i == null) {
                 return false;
+            }
             return (i == 1);
         }
     }

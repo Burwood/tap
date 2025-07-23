@@ -73,7 +73,7 @@ import ca.nrc.cadc.auth.RunnableAction;
 import ca.nrc.cadc.auth.SSLUtil;
 import ca.nrc.cadc.net.FileContent;
 import ca.nrc.cadc.net.HttpDelete;
-import ca.nrc.cadc.net.HttpDownload;
+import ca.nrc.cadc.net.HttpGet;
 import ca.nrc.cadc.net.HttpPost;
 import ca.nrc.cadc.net.HttpUpload;
 import ca.nrc.cadc.net.OutputStreamWrapper;
@@ -89,7 +89,7 @@ import ca.nrc.cadc.uws.ExecutionPhase;
 import ca.nrc.cadc.uws.Job;
 import ca.nrc.cadc.uws.JobReader;
 import ca.nrc.cadc.vosi.TableWriter;
-import ca.nrc.cadc.vosi.actions.TableDescHandler;
+import ca.nrc.cadc.vosi.actions.TablesInputHandler;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
@@ -127,11 +127,13 @@ abstract class AbstractTablesTest {
     
     static String VALID_TEST_GROUP = "ivo://cadc.nrc.ca/gms?YouCat-ReadWrite";
 
+    Subject admin;
     Subject anon;
     Subject schemaOwner;
     Subject subjectWithGroups;
     
-    protected String testSchemaName = "int_test_schema"; 
+    protected String testSchemaName = "int_test_schema";
+    protected final String testCreateSchema = "test_create_schema";
     
     URL anonQueryURL;
     URL certQueryURL;
@@ -143,7 +145,13 @@ abstract class AbstractTablesTest {
     
     AbstractTablesTest() { 
         try {
-            File cf = FileUtil.getFileFromResource(SCHEMA_OWNER_CERT, AbstractTablesTest.class);
+            anon = AuthenticationUtil.getAnonSubject();
+            
+            File cf = FileUtil.getFileFromResource(YOUCAT_ADMIN, AbstractTablesTest.class);
+            admin = SSLUtil.createSubject(cf);
+            log.debug("created admin: " + admin);
+            
+            cf = FileUtil.getFileFromResource(SCHEMA_OWNER_CERT, AbstractTablesTest.class);
             schemaOwner = SSLUtil.createSubject(cf);
             anon = AuthenticationUtil.getAnonSubject();
             log.debug("created schemaOwner: " + schemaOwner);
@@ -173,9 +181,20 @@ abstract class AbstractTablesTest {
         }
     }
     
-    void doDelete(Subject subject, String testTable, boolean fnf) throws Exception {
+    protected void checkTestSchema(String name) {
+        if (name.equals(testCreateSchema) || name.equals(testSchemaName) || name.startsWith(testSchemaName + ".")) {
+            return; // ok
+        }
+        throw new RuntimeException("TEST BUG: attempt to use schema|table name " + name
+                + " not in test schema " + testSchemaName);
+    }
+    
+    void doDelete(Subject subject, String tableName, boolean fnf) throws Exception {
+        checkTestSchema(tableName);
+        
+        URL tableURL = new URL(certTablesURL.toExternalForm() + "/" + tableName);
+        
         // delete
-        URL tableURL = new URL(certTablesURL.toExternalForm() + "/" + testTable);
         HttpDelete del = new HttpDelete(tableURL, false);
         log.info("doDelete: " + tableURL);
         Subject.doAs(subject, new RunnableAction(del));
@@ -189,13 +208,14 @@ abstract class AbstractTablesTest {
             throw (Exception) del.getThrowable();
         }
 
-        URL getTableURL = new URL(certTablesURL.toExternalForm() + "/" + testTable);
-        HttpDownload check = new HttpDownload(getTableURL, new ByteArrayOutputStream());
+        HttpGet check = new HttpGet(tableURL, new ByteArrayOutputStream());
         Subject.doAs(subject, new RunnableAction(check));
         Assert.assertEquals("table deleted", 404, check.getResponseCode());
     }
     
     TableDesc doCreateTable(Subject subject, String tableName) throws Exception {
+        checkTestSchema(tableName);
+
         // cleanup just in case
         doDelete(subject, tableName, true);
 
@@ -236,7 +256,7 @@ abstract class AbstractTablesTest {
             }
         };
         HttpUpload put = new HttpUpload(src, tableURL);
-        put.setContentType(TableDescHandler.VOSI_TABLE_TYPE);
+        put.setContentType(TablesInputHandler.VOSI_TABLE_TYPE);
         log.info("doCreateTable: " + tableURL);
         Subject.doAs(subject, new RunnableAction(put));
         log.info("doCreateTable: " + put.getResponseCode());
@@ -248,14 +268,17 @@ abstract class AbstractTablesTest {
     }
     
     void doCreateIndex(Subject subject, String tableName, String indexCol, boolean unique, ExecutionPhase expected, String emsg) throws Exception {
+        checkTestSchema(tableName);
+
         Assert.assertNotNull("found async table-update URL", certUpdateURL);
         
         // create job
         Map<String,Object> params = new TreeMap<String,Object>();
-        params.put("table", tableName);
         params.put("index", indexCol);
+        params.put("table", tableName);
         params.put("unique", Boolean.toString(unique));
         HttpPost post = new HttpPost(certUpdateURL, params, false);
+        post.setMaxRetries(0); // testing read-only and offline mode
         Subject.doAs(subject, new RunnableAction(post));
         Assert.assertNull("throwable", post.getThrowable());
         Assert.assertEquals("response code", 303, post.getResponseCode());
@@ -263,7 +286,7 @@ abstract class AbstractTablesTest {
         Assert.assertNotNull("jobURL", jobURL);
         log.info("create index job: " + jobURL);
         ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        HttpDownload get = new HttpDownload(jobURL, bos);
+        HttpGet get = new HttpGet(jobURL, bos);
         Subject.doAs(subject, new RunnableAction(get));
         Assert.assertNull("throwable", get.getThrowable());
         Assert.assertEquals("response code", 200, get.getResponseCode());
@@ -281,7 +304,7 @@ abstract class AbstractTablesTest {
         // wait for completion
         bos.reset();
         final URL blockURL = new URL(jobURL.toExternalForm() + "?WAIT=60");
-        HttpDownload block = new HttpDownload(blockURL, bos);
+        HttpGet block = new HttpGet(blockURL, bos);
         Subject.doAs(subject, new RunnableAction(block));
         Assert.assertNull("throwable", block.getThrowable());
         Assert.assertEquals("response code", 200, block.getResponseCode());
@@ -303,6 +326,7 @@ abstract class AbstractTablesTest {
     }
     
     protected void setPerms(Subject subject, String name, TapPermissions tp, int expectedCode) throws MalformedURLException {
+        checkTestSchema(name);
         
         StringBuilder perms = new StringBuilder();
         if (tp.isPublic != null) {
@@ -321,11 +345,12 @@ abstract class AbstractTablesTest {
             perms.append("rw-group=\n");
         }
         
-        log.info("Setting perms: " + perms);
+        log.info("Setting perms:\n" + perms);
         
         FileContent content = new FileContent(perms.toString(), "text/plain", Charset.forName("utf-8"));
         URL schemaURL = new URL(permsURL.toString() + "/" + name);
         HttpPost post = new HttpPost(schemaURL, content, false);
+        post.setMaxRetries(0); // testing read-only and offline mode
         Subject.doAs(subject, new RunnableAction(post));
         Assert.assertEquals(expectedCode, post.getResponseCode());
         

@@ -69,6 +69,7 @@ package ca.nrc.cadc.vosi.actions;
 
 import ca.nrc.cadc.auth.AuthenticationUtil;
 import ca.nrc.cadc.auth.HttpPrincipal;
+import ca.nrc.cadc.auth.IdentityManager;
 import ca.nrc.cadc.db.DatabaseTransactionManager;
 import ca.nrc.cadc.net.ResourceAlreadyExistsException;
 import ca.nrc.cadc.profiler.Profiler;
@@ -79,6 +80,7 @@ import ca.nrc.cadc.tap.schema.SchemaDesc;
 import ca.nrc.cadc.tap.schema.TableDesc;
 import ca.nrc.cadc.tap.schema.TapPermissions;
 import ca.nrc.cadc.tap.schema.TapSchemaDAO;
+import java.security.Principal;
 import javax.security.auth.Subject;
 import javax.sql.DataSource;
 import org.apache.log4j.Logger;
@@ -93,8 +95,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 public class PutAction extends TablesAction {
     private static final Logger log = Logger.getLogger(PutAction.class);
     
-    private static final String INPUT_TAG = "inputTable";
-
     public PutAction() { 
     }
 
@@ -108,31 +108,52 @@ public class PutAction extends TablesAction {
         
         checkWritable();
         
-        TapSchemaDAO ts = getTapSchemaDAO();
-        if (tableName == null) {
-            // create schema
-            checkIsAdmin();
-        } else {
-            // create table
-            checkSchemaWritePermissions(ts, schemaName);
+        if (schemaName == null && tableName == null) {
+            throw new IllegalArgumentException("missing schema|table name in path");
         }
         
+        TapSchemaDAO ts = getTapSchemaDAO();
         if (tableName != null) {
+            TablesAction.checkSchemaWritePermissions(ts, schemaName, logInfo);
             createTable(ts, schemaName, tableName);
         } else if (schemaName != null) {
+            checkIsAdmin();
             createSchema(ts, schemaName);
         }
+        
+        syncOutput.setCode(200); // should be 201
     }
     
     private void createSchema(TapSchemaDAO ts, String schema) throws Exception {
-        log.warn("createSchema: " + schema + " START");
-        String owner = getInputSchemaOwner();
-        Subject s = new Subject();
-        s.getPrincipals().add(new HttpPrincipal(owner));
+        log.debug("createSchema: " + schema + " START");
+        SchemaDesc cur = ts.getSchema(schema, 0);
+        if (cur != null) {
+            throw new ResourceAlreadyExistsException("schema: " + schema);
+        }
 
-        SchemaDesc sd = new SchemaDesc(schema);
+        SchemaDesc inputSchema = getInputSchema(schema);
+        String owner = syncInput.getHeader("x-schema-owner"); // HACK
+        if (inputSchema == null || owner == null) {
+            throw new IllegalArgumentException("no input schema & owner");
+        }
+        
+        IdentityManager im = AuthenticationUtil.getIdentityManager();
+        Subject s;
+        if (owner.startsWith("openid ")) {
+            String oid = owner.replace("openid ", "");
+            s = im.toSubject(oid);
+        } else {
+            // this will only work if the IdentityManager.augment call below
+            // can map HttpPrincipal to the desired owner type
+            s = new Subject();
+            HttpPrincipal op = new HttpPrincipal(owner);
+            s.getPrincipals().add(op);
+        }
+        
+        // flag schema as created using the TAP API
+        inputSchema.apiCreated = true;
         TapPermissions perms = new TapPermissions();
-        perms.owner = AuthenticationUtil.getIdentityManager().augment(s);
+        perms.owner = im.augment(s);
         
         String[] createSQL = new String[] {
             "CREATE SCHEMA " + schema,
@@ -149,16 +170,26 @@ public class PutAction extends TablesAction {
             if (getCreateSchemaEnabled()) {
                 JdbcTemplate jdbc = new JdbcTemplate(ds);
                 for (String sql : createSQL) {
-                    log.warn(sql);
+                    log.debug(sql);
                     jdbc.execute(sql);
                 }
             }
-            log.warn("update tap_schema: " + sd);
-            ts.put(sd);
-            log.warn("set permissions: " + perms);
+            log.debug("update tap_schema: " + inputSchema);
+            ts.put(inputSchema);
+            log.debug("set permissions: " + perms);
             ts.setSchemaPermissions(schema, perms);
             
             tm.commitTransaction();
+        } catch (UnsupportedOperationException ex) {
+            try {
+                log.debug("PUT failed - rollback", ex);
+                tm.rollbackTransaction();
+                log.debug("PUT failed - rollback: OK");
+            } catch (Exception oops) {
+                log.error("PUT failed - rollback : FAIL", oops);
+            }
+            log.debug("createSchema: " + schema + " FAIL");
+            throw ex;
         } catch (Exception ex) {
             try {
                 log.error("PUT failed - rollback", ex);
@@ -167,8 +198,8 @@ public class PutAction extends TablesAction {
             } catch (Exception oops) {
                 log.error("PUT failed - rollback : FAIL", oops);
             }
-            log.warn("createSchema: " + schema + " FAIL");
-            // TODO: categorise failures better
+            log.debug("createSchema: " + schema + " FAIL");
+            
             throw new RuntimeException("failed to create schema " + schema, ex);
         } finally {
             
@@ -180,10 +211,10 @@ public class PutAction extends TablesAction {
                 } catch (Exception oops) {
                     log.error("BUG: rollback in finally: FAIL", oops);
                 }
-                log.warn("createSchema: " + schema + " FAIL");
+                log.debug("createSchema: " + schema + " FAIL");
                 throw new RuntimeException("BUG: open transaction in finally");
             }
-            log.warn("createSchema: " + schema + " DONE");
+            log.debug("createSchema: " + schema + " DONE");
         }
         
     }
@@ -194,22 +225,11 @@ public class PutAction extends TablesAction {
             throw new IllegalArgumentException("no input table");
         }
         
-        // check that the table description does not specify any indexed columns since we
-        // have to force separate index creation
-        StringBuilder sb = new StringBuilder();
+        // strip out some incoming table metadata
+        // - indexed flag (separate index creation)
         for (ColumnDesc cd : inputTable.getColumnDescs()) {
-            if (cd.indexed) {
-                if (sb.length() > 0) {
-                    sb.append(", ");
-                }
-                sb.append(cd.getColumnName());
-            }
+            cd.indexed = false;
         }
-        if (sb.length() > 0) {
-            throw new UnsupportedOperationException("cannot create table with indices -- found indexed=true for the following columns: "
-                    + sb.toString());
-        }
-            
         DataSource ds = getDataSource();
         ts.setDataSource(ds);
         TableDesc td = ts.getTable(tableName);
@@ -229,6 +249,8 @@ public class PutAction extends TablesAction {
             prof.checkpoint("create-table");
             
             // add to tap_schema
+            // flag table as created using the API to allow table deletion in the DeleteAction
+            inputTable.apiCreated = true;
             ts.put(inputTable);
             prof.checkpoint("insert-into-tap-schema");
             
@@ -269,7 +291,7 @@ public class PutAction extends TablesAction {
 
     @Override
     protected InlineContentHandler getInlineContentHandler() {
-        return new TableDescHandler(INPUT_TAG);
+        return new TablesInputHandler(INPUT_TAG);
     }
     
     private String getInputSchemaOwner() {
@@ -282,37 +304,5 @@ public class PutAction extends TablesAction {
             return schemaOwner;
         }
         throw new RuntimeException("BUG: no input schema owner");
-    }
-
-    // unused because VOSO tableset schema does not include owner
-    private SchemaDesc getInputSchema(String schemaName) {
-        Object in = syncInput.getContent(INPUT_TAG);
-        if (in == null) {
-            throw new IllegalArgumentException("no input: expected a document describing the schema to create");
-        }
-        if (in instanceof SchemaDesc) {
-            SchemaDesc input = (SchemaDesc) in;
-            return input;
-        }
-        throw new RuntimeException("BUG: no input schema");
-    }
-
-    private TableDesc getInputTable(String schemaName, String tableName) {
-        Object in = syncInput.getContent(INPUT_TAG);
-        if (in == null) {
-            throw new IllegalArgumentException("no input: expected a document describing the table to create");
-        }
-        if (in instanceof TableDesc) {
-            TableDesc input = (TableDesc) in;
-            input.setSchemaName(schemaName);
-            input.setTableName(tableName);
-            int c = 0;
-            for (ColumnDesc cd : input.getColumnDescs()) {
-                cd.setTableName(tableName);
-                cd.column_index = c++;
-            }
-            return input;
-        }
-        throw new RuntimeException("BUG: no input table");
     }
 }

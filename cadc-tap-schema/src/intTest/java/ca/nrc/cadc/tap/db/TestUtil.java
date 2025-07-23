@@ -3,12 +3,12 @@
 *******************  CANADIAN ASTRONOMY DATA CENTRE  *******************
 **************  CENTRE CANADIEN DE DONNÉES ASTRONOMIQUES  **************
 *
-*  (c) 2009.                            (c) 2009.
+*  (c) 2024.                            (c) 2024.
 *  Government of Canada                 Gouvernement du Canada
 *  National Research Council            Conseil national de recherches
 *  Ottawa, Canada, K1A 0R6              Ottawa, Canada, K1A 0R6
 *  All rights reserved                  Tous droits réservés
-*                                       
+*
 *  NRC disclaims any warranties,        Le CNRC dénie toute garantie
 *  expressed, implied, or               énoncée, implicite ou légale,
 *  statutory, of any kind with          de quelque nature que ce
@@ -31,10 +31,10 @@
 *  software without specific prior      de ce logiciel sans autorisation
 *  written permission.                  préalable et particulière
 *                                       par écrit.
-*                                       
+*
 *  This file is part of the             Ce fichier fait partie du projet
 *  OpenCADC project.                    OpenCADC.
-*                                       
+*
 *  OpenCADC is free software:           OpenCADC est un logiciel libre ;
 *  you can redistribute it and/or       vous pouvez le redistribuer ou le
 *  modify it under the terms of         modifier suivant les termes de
@@ -44,7 +44,7 @@
 *  either version 3 of the              : soit la version 3 de cette
 *  License, or (at your option)         licence, soit (à votre gré)
 *  any later version.                   toute version ultérieure.
-*                                       
+*
 *  OpenCADC is distributed in the       OpenCADC est distribué
 *  hope that it will be useful,         dans l’espoir qu’il vous
 *  but WITHOUT ANY WARRANTY;            sera utile, mais SANS AUCUNE
@@ -54,7 +54,7 @@
 *  PURPOSE.  See the GNU Affero         PARTICULIER. Consultez la Licence
 *  General Public License for           Générale Publique GNU Affero
 *  more details.                        pour plus de détails.
-*                                       
+*
 *  You should have received             Vous devriez avoir reçu une
 *  a copy of the GNU Affero             copie de la Licence Générale
 *  General Public License along         Publique GNU Affero avec
@@ -62,72 +62,43 @@
 *  <http://www.gnu.org/licenses/>.      pas le cas, consultez :
 *                                       <http://www.gnu.org/licenses/>.
 *
-*  $Revision: 4 $
-*
 ************************************************************************
 */
 
-package ca.nrc.cadc.tap;
+package ca.nrc.cadc.tap.db;
 
-import ca.nrc.cadc.uws.Parameter;
-import ca.nrc.cadc.uws.ParameterUtil;
-import java.util.List;
+import ca.nrc.cadc.db.ConnectionConfig;
+import ca.nrc.cadc.db.DBConfig;
+import ca.nrc.cadc.db.DBUtil;
+import ca.nrc.cadc.util.Log4jInit;
+import javax.sql.DataSource;
+import org.apache.log4j.Level;
+import org.apache.log4j.Logger;
 
 /**
- * TAP Validator. This now defaults to VERSION=1.1 and ignores REQUEST, but
- * if the caller specifies VERSION=1.0 then REQUEST must be <code>doQuery</code>.
  *
+ * @author pdowler
  */
-public class TapValidator
-{
-    public static final String DEFAULT_VERSION = "1.1";
-    
-    private String version;
+public abstract class TestUtil {
+    private static final Logger log = Logger.getLogger(TestUtil.class);
 
-    public void validateVersion(List<Parameter> paramList)
-    {
-        if (version != null)
-            return;
-        
-        if (paramList == null || paramList.isEmpty())
-        {
-            version = DEFAULT_VERSION;
-            return; // default is TAP-1.1 with no required params
-        }
-        
-        this.version = ParameterUtil.findParameterValue("VERSION", paramList);
-        if (version == null || version.isEmpty())
-            version = DEFAULT_VERSION;
-       
-        if (DEFAULT_VERSION.equals(version) || "1.0".equals(version))
-            return;
-        
-        throw new IllegalArgumentException("Unsupported TAP version: " + version);
+    static {
+        Log4jInit.setLevel("ca.nrc.cadc.tap", Level.INFO);
     }
     
-    public void validate(List<Parameter> paramList)
-    {
-        validateVersion(paramList);
-        if (paramList == null || paramList.isEmpty())
-            return; // default is TAP-1.1 with no required params
-        
-        //    throw new IllegalStateException("Missing required parameter: REQUEST");
-        //  VERSION
-        this.version = ParameterUtil.findParameterValue("VERSION", paramList);
-        if ("1.0".equals(version))
-        {
-            //  REQUEST
-            String request = ParameterUtil.findParameterValue("REQUEST", paramList);
-            if (request == null || request.trim().length() == 0)
-                throw new IllegalArgumentException("VERSION=1.0: Missing required parameter: REQUEST");
-            if (!"doQuery".equals(request))
-                throw new IllegalArgumentException("VERSION=1.0: invalid REQUEST value: " + request);
+    protected final String testSchemaName = "tap_schema";
+    protected DataSource dataSource;
+    
+    public TestUtil() {
+        // create a datasource and register with JNDI
+        try {
+            DBConfig conf = new DBConfig();
+            ConnectionConfig cc = conf.getConnectionConfig("TAP_SCHEMA_TEST", "cadctest");
+            dataSource = DBUtil.getDataSource(cc, true, true);
+            log.info("configured data source: " + cc.getServer() + "," + cc.getDatabase() + "," + cc.getDriver() + "," + cc.getURL());
+        } catch (Exception ex) {
+            log.error("setup failed", ex);
+            throw new IllegalStateException("failed to create DataSource", ex);
         }
     }
-
-    public String getVersion()
-    {
-        return version;
-    }
-
 }
