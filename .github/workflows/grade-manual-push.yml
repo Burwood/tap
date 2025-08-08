@@ -43,11 +43,4 @@ jobs:
     - name: build youcat
       run: cd youcat && ../gradlew --info clean build
 
-    - name: build and test cadc-tap-server-bigquery
-      run: cd cadc-tap-server-bigquery && ../gradlew --info clean build javadoc install
-
-    - name: Publish package
-      run: cd cadc-tap-server-bigquery && ../gradlew --info publish
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
